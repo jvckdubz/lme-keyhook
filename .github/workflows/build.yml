@@ -1,0 +1,56 @@
+name: APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+
+    env:
+      KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ключ подписи из секрета
+        if: env.KEYSTORE_B64 != ''
+        run: printf '%s' "$KEYSTORE_B64" | base64 -d > key.jks
+
+      - name: Сборка
+        run: sh build.sh
+
+      - name: Отпечаток APK
+        run: sha256sum out/keyhook.apk | tee sha256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keyhook-apk
+          path: out/keyhook.apk
+          if-no-files-found: error
+
+      - name: Выложить в релиз
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA=$(cut -d' ' -f1 sha256.txt)
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest out/keyhook.apk \
+            --title "Свежая сборка" \
+            --notes "Собрано из \`${GITHUB_SHA:0:7}\`.
+
+          sha256 APK: \`$SHA\`
+
+          Установка:
+
+          \`\`\`sh
+          adb install -r keyhook.apk
+          adb shell \"settings put secure enabled_accessibility_services ru.lme.keyhook/ru.lme.keyhook.KeyHookService; settings put secure accessibility_enabled 1\"
+          \`\`\`
+
+          Подробности и что стоит знать заранее — в README."
